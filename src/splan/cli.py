@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import __version__
 from .client import StarPlanClient
+from .config import speichere_standardgruppe, standardgruppe
 from .dates import (
     als_text,
     woche_fuer_optionen,
@@ -52,7 +53,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"splan {__version__}",
     )
-    subparsers = parser.add_subparsers(dest="command", metavar="{suche,plan,heute,raum,ics}")
+    subparsers = parser.add_subparsers(dest="command", metavar="{suche,plan,heute,raum,ics,standard}")
 
     suche = subparsers.add_parser(
         "suche",
@@ -67,7 +68,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Wochenplan einer Planungsgruppe anzeigen",
         description="Zeigt den Plan einer Planungsgruppe für eine Woche.",
     )
-    plan.add_argument("gruppe", metavar="GRUPPE", help="Kürzel oder Name der Gruppe")
+    plan.add_argument(
+        "gruppe",
+        nargs="?",
+        metavar="GRUPPE",
+        help="Kürzel oder Name der Gruppe (Standard: gespeicherte Standardgruppe)",
+    )
     plan.add_argument(
         "--woche", type=int, metavar="KW", help="Kalenderwoche nach ISO 8601"
     )
@@ -109,6 +115,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Zieldatei (Standard: <GRUPPE>.ics im aktuellen Verzeichnis)",
     )
     ics.set_defaults(func=_cmd_ics)
+
+    standard = subparsers.add_parser(
+        "standard",
+        help="Standardgruppe für heute und plan speichern",
+        description="Prüft die Gruppe und speichert ihr Kürzel als Standardgruppe.",
+    )
+    standard.add_argument("gruppe", metavar="GRUPPE", help="Kürzel oder Name der Gruppe")
+    standard.set_defaults(func=_cmd_standard)
 
     return parser
 
@@ -200,6 +214,18 @@ def _woche_pruefen(semester: Semester, week_start) -> None:
         )
 
 
+def _gruppe_oder_standard(gruppe: str | None) -> str:
+    if gruppe:
+        return gruppe
+    gespeichert = standardgruppe()
+    if not gespeichert:
+        raise NotFoundError(
+            "Keine Standardgruppe gespeichert.",
+            "splan standard GRUPPE ausführen oder eine Gruppe angeben",
+        )
+    return gespeichert
+
+
 def _cmd_suche(args: argparse.Namespace, client: StarPlanClient, json_mode: bool) -> int:
     semester, treffer = client.suche_studiengaenge(args.studiengang)
     if json_mode:
@@ -222,7 +248,7 @@ def _cmd_suche(args: argparse.Namespace, client: StarPlanClient, json_mode: bool
 
 def _cmd_plan(args: argparse.Namespace, client: StarPlanClient, json_mode: bool) -> int:
     week_start = woche_fuer_optionen(args.woche, args.datum)
-    semester, gruppe = client.finde_gruppe(args.gruppe)
+    semester, gruppe = client.finde_gruppe(_gruppe_oder_standard(args.gruppe))
     _woche_pruefen(semester, week_start)
     html = client.timetable_pg(semester, gruppe, week_start)
     fallback = [week_start + timedelta(days=i) for i in range(5)]
@@ -254,14 +280,9 @@ def _cmd_plan(args: argparse.Namespace, client: StarPlanClient, json_mode: bool)
 
 
 def _cmd_heute(args: argparse.Namespace, client: StarPlanClient, json_mode: bool) -> int:
-    if not args.gruppe:
-        raise NotFoundError(
-            "Keine Standardgruppe gespeichert.",
-            "splan standard GRUPPE ausführen oder eine Gruppe angeben",
-        )
     today = client.today
     week_start = wochenstart(today)
-    semester, gruppe = client.finde_gruppe(args.gruppe)
+    semester, gruppe = client.finde_gruppe(_gruppe_oder_standard(args.gruppe))
     _woche_pruefen(semester, week_start)
     html = client.timetable_pg(semester, gruppe, week_start)
     fallback = [week_start + timedelta(days=i) for i in range(5)]
@@ -368,6 +389,25 @@ def _cmd_ics(args: argparse.Namespace, client: StarPlanClient, json_mode: bool) 
 
     print(f"ICal gespeichert: {ziel}")
     print(f"{termine} Termin" if termine == 1 else f"{termine} Termine")
+    return 0
+
+
+def _cmd_standard(
+    args: argparse.Namespace, client: StarPlanClient, json_mode: bool
+) -> int:
+    _semester, gruppe = client.finde_gruppe(args.gruppe)
+    pfad = speichere_standardgruppe(gruppe.shortname)
+    if json_mode:
+        _emit_json(
+            {
+                "ok": True,
+                "standardgruppe": gruppe.shortname,
+                "config": str(pfad),
+            }
+        )
+        return 0
+
+    print(f"Standardgruppe gespeichert: {gruppe.shortname}")
     return 0
 
 

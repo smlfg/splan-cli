@@ -138,3 +138,15 @@ def test_standard_gruppe() -> None:
         assert "Standardgruppe gespeichert: AI1" in output
         assert config.is_file()
         assert "AI1" in config.read_text(encoding="utf-8")
+
+
+def test_standard_gruppe_gilt_fuer_heute() -> None:
+    with _fake_server("standard-heute") as (_server, env, _home):
+        code, output = _run(["standard", "AI1"], env)
+        assert code == 0, output
+
+        code, output = _run(["heute"], env)
+
+    assert code == 0, output
+    assert "Heute, Montag 02.11.2026 – AI1" in output
+    assert "08:00-09:30  Lineare Algebra und Computergrafik (173423)" in output
