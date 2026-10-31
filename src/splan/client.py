@@ -244,6 +244,45 @@ class StarPlanClient:
         data = self._get_json({"m": "getros", "loc": loc}, "getros")
         return _entries(data, "getros")
 
+    def alle_raeume(self) -> list[Raum]:
+        result: list[Raum] = []
+        for standort in self.standorte():
+            for item in self.raeume(standort.id):
+                result.append(
+                    Raum(
+                        id=_require_int(item, "id", "getros"),
+                        shortname=_text(item, "shortname"),
+                        name=_text(item, "name"),
+                        standort=standort,
+                    )
+                )
+        return result
+
+    def finde_raum(self, begriff: str) -> Raum:
+        needle = begriff.casefold().strip()
+        raeume = self.alle_raeume()
+        exakt = [item for item in raeume if needle == item.shortname.casefold()]
+        kandidaten = exakt or [
+            item
+            for item in raeume
+            if needle in item.shortname.casefold() or needle in item.name.casefold()
+        ]
+        if not kandidaten:
+            raise NotFoundError(
+                f"Raum {begriff!r} nicht gefunden.",
+                f"einen anderen Raumnamen verwenden, z. B. splan raum {begriff}",
+            )
+        if len(kandidaten) > 1:
+            namen = ", ".join(
+                f"{item.shortname} ({item.standort.shortname})"
+                for item in kandidaten[:8]
+            )
+            raise NotFoundError(
+                f"Raum {begriff!r} ist nicht eindeutig: {namen}",
+                "den Raumnamen präzisieren, z. B. splan raum A411",
+            )
+        return kandidaten[0]
+
     def alle_planungsgruppen(self, semester: Semester) -> list[Planungsgruppe]:
         result: list[Planungsgruppe] = []
         seen: set[int] = set()

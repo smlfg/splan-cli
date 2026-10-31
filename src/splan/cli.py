@@ -17,7 +17,14 @@ from .dates import (
     wochentag,
 )
 from .errors import NotFoundError, SplanError, UsageError
-from .models import Planungsgruppe, Semester, Studiengang, Tag, Veranstaltung
+from .models import (
+    Planungsgruppe,
+    Raum,
+    Semester,
+    Studiengang,
+    Tag,
+    Veranstaltung,
+)
 from .parser import parse_timetable
 
 
@@ -44,7 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"splan {__version__}",
     )
-    subparsers = parser.add_subparsers(dest="command", metavar="{suche,plan,heute}")
+    subparsers = parser.add_subparsers(dest="command", metavar="{suche,plan,heute,raum}")
 
     suche = subparsers.add_parser(
         "suche",
@@ -77,6 +84,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "gruppe", nargs="?", metavar="GRUPPE", help="Kürzel oder Name der Gruppe"
     )
     heute.set_defaults(func=_cmd_heute)
+
+    raum = subparsers.add_parser(
+        "raum",
+        help="Belegung eines Raums anzeigen",
+        description=(
+            "Sucht einen Raum über alle Standorte und zeigt seine Belegung "
+            "für die aktuelle Woche."
+        ),
+    )
+    raum.add_argument("raumname", metavar="RAUMNAME", help="Kürzel oder Name des Raums")
+    raum.set_defaults(func=_cmd_raum)
 
     return parser
 
@@ -259,6 +277,49 @@ def _cmd_heute(args: argparse.Namespace, client: StarPlanClient, json_mode: bool
         return 0
     for item in tag.veranstaltungen:
         _print_veranstaltung(item)
+    return 0
+
+
+def _raum_json(raum: Raum) -> dict:
+    return {
+        "id": raum.id,
+        "shortname": raum.shortname,
+        "name": raum.name,
+        "standort": {
+            "id": raum.standort.id,
+            "shortname": raum.standort.shortname,
+            "name": raum.standort.name,
+        },
+    }
+
+
+def _cmd_raum(args: argparse.Namespace, client: StarPlanClient, json_mode: bool) -> int:
+    week_start = woche_fuer_optionen(None, None)
+    raum = client.finde_raum(args.raumname)
+    semester = client.current_semester()
+    _woche_pruefen(semester, week_start)
+    html = client.timetable_room(semester, raum, week_start)
+    fallback = [week_start + timedelta(days=i) for i in range(5)]
+    tage = parse_timetable(html, fallback)
+    if json_mode:
+        _emit_json(
+            {
+                "ok": True,
+                "raum": _raum_json(raum),
+                "woche": {
+                    "von": week_start.isoformat(),
+                    "bis": wochenende(week_start).isoformat(),
+                },
+                "tage": [_tag_json(tag) for tag in tage],
+            }
+        )
+        return 0
+
+    print(f"Raum {raum.shortname} – {raum.standort.shortname}")
+    for tag in tage:
+        print(f"{tag.wochentag}, {als_text(tag.datum)}")
+        for item in tag.veranstaltungen:
+            _print_veranstaltung(item, mit_gruppe=True)
     return 0
 
 

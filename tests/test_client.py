@@ -110,6 +110,27 @@ def test_raumliste() -> None:
     assert any(item.get("shortname") == "A411" for item in raeume)
 
 
+def test_raum_exakt_und_teilstring() -> None:
+    client = _client()
+
+    raum = client.finde_raum("A411")
+    assert raum.id == 71
+    assert raum.standort.shortname == "TechCampus HN"
+
+    raum = client.finde_raum("SSI")
+    assert raum.shortname == "A208"
+
+
+def test_unbekannter_raum() -> None:
+    client = _client()
+
+    with pytest.raises(NotFoundError) as excinfo:
+        client.finde_raum("Z999")
+
+    assert excinfo.value.code == 1
+    assert "splan raum" in excinfo.value.next_step
+
+
 def test_fehlercodes() -> None:
     def status(code: int):
         return lambda url: Response(code, "text/plain", b"")
