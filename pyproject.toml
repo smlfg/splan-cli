@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "splan-cli"
+version = "0.1.0"
+description = "Stundenplaene der Hochschule Heilbronn aus StarPlan im Terminal"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "smlfg", email = "186922365+smlfg@users.noreply.github.com" },
+]
+dependencies = []
+
+[project.scripts]
+splan = "splan.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
