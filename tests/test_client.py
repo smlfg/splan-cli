@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -158,3 +159,43 @@ def test_kaputtes_json() -> None:
     with pytest.raises(SourceError) as excinfo:
         client.semesters()
     assert excinfo.value.code == 3
+
+
+def test_iso_8859_1_json_mit_umlauten() -> None:
+    body = json.dumps(
+        [
+            [
+                {
+                    "id": 1379,
+                    "shortname": "AKI",
+                    "name": "Angewandte Künstliche Intelligenz",
+                }
+            ]
+        ],
+        ensure_ascii=False,
+    ).encode("cp1252")
+    client = StarPlanClient(
+        "http://127.0.0.1:9/",
+        fetcher=lambda url: Response(
+            200, "application/json", body, charset="ISO-8859-1"
+        ),
+    )
+
+    treffer = client.studiengaenge(48)
+
+    assert treffer[0].name == "Angewandte Künstliche Intelligenz"
+
+
+def test_iso_8859_1_ohne_charset_erkannt() -> None:
+    body = json.dumps(
+        [[{"id": 1379, "shortname": "AKI", "name": "Künstliche Intelligenz"}]],
+        ensure_ascii=False,
+    ).encode("cp1252")
+    client = StarPlanClient(
+        "http://127.0.0.1:9/",
+        fetcher=lambda url: Response(200, "application/json", body),
+    )
+
+    treffer = client.studiengaenge(48)
+
+    assert treffer[0].name == "Künstliche Intelligenz"

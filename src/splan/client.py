@@ -25,6 +25,7 @@ class Response:
     status: int
     content_type: str
     body: bytes
+    charset: str | None = None
 
 
 Fetcher = Callable[[str], Response]
@@ -44,13 +45,21 @@ def _urllib_fetch(url: str, timeout: float) -> Response:
                 status=int(response.status),
                 content_type=response.headers.get_content_type(),
                 body=response.read(),
+                charset=response.headers.get_content_charset(),
             )
     except HTTPError as exc:
         body = exc.read()
         content_type = ""
+        charset = None
         if exc.headers is not None:
             content_type = exc.headers.get_content_type()
-        return Response(status=int(exc.code), content_type=content_type, body=body)
+            charset = exc.headers.get_content_charset()
+        return Response(
+            status=int(exc.code),
+            content_type=content_type,
+            body=body,
+            charset=charset,
+        )
     except (URLError, TimeoutError, OSError, ValueError) as exc:
         reason = getattr(exc, "reason", exc)
         raise SourceError(
@@ -105,6 +114,24 @@ def _text(item: dict, key: str) -> str:
     return "" if value is None else str(value).strip()
 
 
+def _decode_body(body: bytes, charset: str | None) -> str:
+    """Dekodiert StarPlan-Antworten inklusive ISO-8859-1/Windows-1252.
+
+    StarPlan deklariert die JSON-Endpunkte als ``ISO-8859-1``, liefert aber
+    Umlaute in Einzelbytes (z. B. 0xfc für „ü“). Zuerst wird der deklarierte
+    Zeichensatz versucht, danach UTF-8 und als letzter Ausweg Windows-1252.
+    """
+    if charset:
+        try:
+            return body.decode(charset)
+        except (LookupError, UnicodeDecodeError):
+            pass
+    try:
+        return body.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return body.decode("cp1252", "replace")
+
+
 class StarPlanClient:
     def __init__(
         self,
@@ -146,8 +173,8 @@ class StarPlanClient:
     def _get_json(self, params: dict[str, object], quelle: str) -> object:
         response = self._get(self._url("json", params))
         try:
-            return json.loads(response.body.decode("utf-8-sig", "replace"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return json.loads(_decode_body(response.body, response.charset))
+        except json.JSONDecodeError as exc:
             raise SourceError(
                 f"StarPlan liefert für {quelle} kein gültiges JSON.",
                 "später erneut versuchen; die StarPlan-Schnittstelle kann sich ändern",
@@ -155,7 +182,7 @@ class StarPlanClient:
 
     def _get_text(self, url: str, quelle: str) -> str:
         response = self._get(url)
-        return response.body.decode("utf-8-sig", "replace")
+        return _decode_body(response.body, response.charset)
 
     def semesters(self) -> list[Semester]:
         data = self._get_json({"m": "getpus"}, "getpus")
