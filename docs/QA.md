@@ -2,6 +2,8 @@
 
 - Datum: 2026-10-31
 - Version: 0.1.0, Commit `2e08172` (`docs(ux): UX-Gate-Bericht`)
+- Nachprüfung S6: 2026-10-31, Fix-Commits `d1945fc` (Umlaute) und
+  `b24e323` (kaputte Konfiguration)
 - Installiert als: `pipx install git+https://github.com/smlfg/splan-cli`
   (frische Umgebung, Protokoll `scratch/qa/pipx-install.log`); geprüfte
   Binary `scratch/pipx/bin/splan`, Quellcode identisch mit Commit `2e08172`
@@ -20,7 +22,7 @@
 | 07 | Studiengang suchen (README-Zeile, TTY) | `splan suche "Angewandte Informatik"` | Semester + AI-Planungsgruppen in Klartext | OK | scratch/qa/suche-tty.log/json-suche.json |
 | 08 | Suche JSON valide | `splan --json suche K` | genau ein JSON, `ok: true` | OK | scratch/qa/json-suche-k.json |
 | 09 | Leeres Suchergebnis | `splan suche Quantenphilosophie` | „Kein Studiengang gefunden …“, Exit 1 | OK | scratch/qa/suche-leer.log |
-| 10 | Suche mit Umlauten | `splan suche "Künstliche"` | Treffer AKI/KID | **FAIL** | scratch/qa/qa-r2-suche-umlaut-true.log; json-suche-k.json zeigt Namen mit Ersetezeichen „K�nstliche“ |
+| 10 | Suche mit Umlauten | `splan suche "Künstliche"` | Treffer AKI/KID | OK (nach Fix d1945fc) | scratch/qa/qa-r3-suche-umlaut.log (AKI/KID); scratch/qa/qa-r3-json-suche-k.json (keine Ersetezeichen) |
 | 11 | Wochenplan aktuelle Woche (TTY) | `splan plan AI1` | Tage/Zeiten/Räume/Dozenten Klartext | OK | scratch/qa/plan-tty.log/json-plan.json |
 | 12 | Filter `--woche 45` | `splan plan AI1 --woche 45` | Header „Woche 02.11.–06.11.2026“ (KW 45 korrekt) | OK | scratch/qa/plan-woche-tty.log |
 | 13 | Filter `--datum` | `splan plan AI1 --datum 2026-11-03` | Tag „Dienstag, 03.11.2026“ im Wochenkontext | OK | scratch/qa/plan-datum-tty.log |
@@ -50,27 +52,25 @@
 | 37 | Ungültige `SPLAN_BASE_URL` | `env SPLAN_BASE_URL=nicht-url splan suche Informatik` | Hinweis vollständige URL angeben | OK | scratch/qa/url-fehler.log |
 | 38 | Netz-Live-Ausfall (SSL-Timeout) | `splan suche` im Ausfall-Fenster | Meldung, kein Traceback | OK | scratch/tmp/qa-r2/suche-umlaut.err + json-heute-dienstag.json („ok“: false) |
 | 39 | TTY liefert Text, Pipe liefert JSON | `splan plan AI1 > datei.json` | genau ein JSON-Objekt | OK | scratch/qa/plan.json |
-| 40 | Kaputte Konfiguration | `env XDG_CONFIG_HOME=… splan heute` mit binär-verfälschter `config.json` | Fehler + nächster Schritt | **FAIL** | scratch/qa/config-kaputt.log + qa-r2-config-kaputt.log (Traceback + `NameError: name 'SourceError' is not defined`) |
-| 41 | Kaputte Konfiguration mit `--json` | `env XDG_CONFIG_HOME=… splan --json heute` | valides JSON auf stdout | **FAIL** | scratch/qa/config-kaputt-json.out (leer) + config-kaputt-json.err (Traceback) — stdout ohne JSON |
+| 40 | Kaputte Konfiguration | `env XDG_CONFIG_HOME=… splan heute` mit binär-verfälschter `config.json` | Fehler + nächster Schritt | OK (nach Fix b24e323) | scratch/qa/qa-r3-config-kaputt.log (kein Traceback, Exit 2) |
+| 41 | Kaputte Konfiguration mit `--json` | `env XDG_CONFIG_HOME=… splan --json heute` | valides JSON auf stdout | OK (nach Fix b24e323) | scratch/qa/qa-r3-config-kaputt-json.out (valides JSON) + qa-r3-config-kaputt-json.err (leer) |
 
 ## Zählung
 
 - Prüfungen: 41
-- OK: 38
-- FAIL: 3 (Zeilen 10, 40, 41; 40/41 sind derselbe Codefehler in zwei Betriebsarten)
+- OK: 41
+- FAIL: 0
 - SKIP: 0
 
-## Offene FAILs
+## Behobene FAILs
 
 1. **Umlaut-Auflösung in der Suche** (Zeile 10): StarPlans JSON-Endpunkte
-   (`getogs`, `getPgsExt`) antworten in windows-1252/ISO-8859-1. Der Client
-   dekodiert mit `utf-8-sig` und `errors="replace"` (`splan/client.py`,
-   `_get_json`), dadurch Namen mit U+FFFD-Ersetezeichen und Suche nach
-   „Künstliche“ ohne Treffer. Beleg raw GET: `getogs`/`getPgsExt` enthalten
-   Byte 0xfc (ü), sind kein gültiges UTF-8.
+   (`getogs`, `getPgsExt`) deklarieren `application/json;charset=ISO-8859-1`.
+   Der Client wertete den Zeichensatz nicht aus und dekodierte mit
+   `utf-8-sig`/`errors="replace"`. Fix `d1945fc` übernimmt den deklarierten
+   Zeichensatz (`splan/client.py`, `_decode_body`, mit UTF-8- und
+   Windows-1252-Fallback); live geprüft, keine Ersetezeichen mehr.
 2. **Kaputte Konfiguration erzeugt Traceback** (Zeilen 40/41): `config.py::_lesen`
-   behandelt `UnicodeDecodeError` nicht; in `cli.py::main` läuft die Ausnahme
-   in den Fallback auf `SourceError(...)` (Zeile 475), was mit
-   `NameError: name 'SourceError' is not defined` endet — der Fallback
-   importiert `SourceError` nicht. Nutzer sieht doppelten Traceback,
-   in `--json` bleibt stdout leer.
+   behandelt jetzt `UnicodeDecodeError` als `ConfigError`; `cli.py` importiert
+   `SourceError` für den globalen Fallback. Fix `b24e323`; live geprüft in
+   Text- und JSON-Modus, jeweils Exit 2 ohne Traceback.
