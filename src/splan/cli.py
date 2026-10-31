@@ -5,11 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import timedelta
 
 from . import __version__
 from .client import StarPlanClient
-from .errors import SplanError, UsageError
-from .models import Planungsgruppe, Semester, Studiengang
+from .dates import als_text, woche_fuer_optionen, wochenende
+from .errors import NotFoundError, SplanError, UsageError
+from .models import Planungsgruppe, Semester, Studiengang, Tag, Veranstaltung
+from .parser import parse_timetable
 
 
 class _Parser(argparse.ArgumentParser):
@@ -35,7 +38,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"splan {__version__}",
     )
-    subparsers = parser.add_subparsers(dest="command", metavar="{suche}")
+    subparsers = parser.add_subparsers(dest="command", metavar="{suche,plan}")
 
     suche = subparsers.add_parser(
         "suche",
@@ -44,6 +47,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     suche.add_argument("studiengang", metavar="STUDIENGANG", help="Name oder Kürzel")
     suche.set_defaults(func=_cmd_suche)
+
+    plan = subparsers.add_parser(
+        "plan",
+        help="Wochenplan einer Planungsgruppe anzeigen",
+        description="Zeigt den Plan einer Planungsgruppe für eine Woche.",
+    )
+    plan.add_argument("gruppe", metavar="GRUPPE", help="Kürzel oder Name der Gruppe")
+    plan.add_argument(
+        "--woche", type=int, metavar="KW", help="Kalenderwoche nach ISO 8601"
+    )
+    plan.add_argument(
+        "--datum", metavar="JJJJ-MM-TT", help="ein Tag in der gewünschten Woche"
+    )
+    plan.set_defaults(func=_cmd_plan)
 
     return parser
 
@@ -79,6 +96,62 @@ def _emit_json(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False))
 
 
+def _veranstaltung_json(item: Veranstaltung) -> dict:
+    return {
+        "start": item.start,
+        "ende": item.ende,
+        "titel": item.titel,
+        "import_id": item.import_id,
+        "raum": item.raum,
+        "dozent": item.dozent,
+        "gruppe": item.gruppe,
+    }
+
+
+def _tag_json(tag: Tag) -> dict:
+    return {
+        "datum": tag.datum.isoformat(),
+        "wochentag": tag.wochentag,
+        "veranstaltungen": [
+            _veranstaltung_json(item) for item in tag.veranstaltungen
+        ],
+    }
+
+
+def _print_veranstaltung(item: Veranstaltung, mit_gruppe: bool = False) -> None:
+    import_id = f" ({item.import_id})" if item.import_id else ""
+    zeile = f"{item.start}-{item.ende}  {item.titel}{import_id}"
+    if mit_gruppe:
+        if item.gruppe:
+            zeile += f" · {item.gruppe}"
+        print(zeile)
+        return
+    print(zeile)
+    raum = f"Raum {item.raum}" if item.raum else ""
+    if raum and item.dozent:
+        print(f"{raum} · {item.dozent}")
+    elif raum:
+        print(raum)
+    elif item.dozent:
+        print(item.dozent)
+
+
+def _woche_pruefen(semester: Semester, week_start) -> None:
+    week_end = wochenende(week_start)
+    if semester.startdate is not None and week_end < semester.startdate:
+        raise NotFoundError(
+            f"Die Woche {als_text(week_start)} bis {als_text(week_end)} liegt "
+            f"vor dem Semester {semester.name}.",
+            "--woche oder --datum innerhalb des Semesters wählen",
+        )
+    if semester.enddate is not None and week_start > semester.enddate:
+        raise NotFoundError(
+            f"Die Woche {als_text(week_start)} bis {als_text(week_end)} liegt "
+            f"nach dem Semester {semester.name}.",
+            "--woche oder --datum innerhalb des Semesters wählen",
+        )
+
+
 def _cmd_suche(args: argparse.Namespace, client: StarPlanClient, json_mode: bool) -> int:
     semester, treffer = client.suche_studiengaenge(args.studiengang)
     if json_mode:
@@ -96,6 +169,39 @@ def _cmd_suche(args: argparse.Namespace, client: StarPlanClient, json_mode: bool
         print(f"{studiengang.name} ({studiengang.shortname})")
         for gruppe in studiengang.planungsgruppen:
             print(f"{gruppe.shortname} – {gruppe.name}")
+    return 0
+
+
+def _cmd_plan(args: argparse.Namespace, client: StarPlanClient, json_mode: bool) -> int:
+    week_start = woche_fuer_optionen(args.woche, args.datum)
+    semester, gruppe = client.finde_gruppe(args.gruppe)
+    _woche_pruefen(semester, week_start)
+    html = client.timetable_pg(semester, gruppe, week_start)
+    fallback = [week_start + timedelta(days=i) for i in range(5)]
+    tage = parse_timetable(html, fallback)
+    if json_mode:
+        _emit_json(
+            {
+                "ok": True,
+                "gruppe": _gruppe_json(gruppe),
+                "semester": {"id": semester.id, "name": semester.name},
+                "woche": {
+                    "von": week_start.isoformat(),
+                    "bis": wochenende(week_start).isoformat(),
+                },
+                "tage": [_tag_json(tag) for tag in tage],
+            }
+        )
+        return 0
+
+    print(
+        f"Plan {gruppe.shortname} – Woche {als_text(week_start)} bis "
+        f"{als_text(wochenende(week_start))}"
+    )
+    for tag in tage:
+        print(f"{tag.wochentag}, {als_text(tag.datum)}")
+        for item in tag.veranstaltungen:
+            _print_veranstaltung(item)
     return 0
 
 
