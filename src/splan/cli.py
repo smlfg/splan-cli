@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from datetime import timedelta
+from pathlib import Path
 
 from . import __version__
 from .client import StarPlanClient
@@ -51,7 +52,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"splan {__version__}",
     )
-    subparsers = parser.add_subparsers(dest="command", metavar="{suche,plan,heute,raum}")
+    subparsers = parser.add_subparsers(dest="command", metavar="{suche,plan,heute,raum,ics}")
 
     suche = subparsers.add_parser(
         "suche",
@@ -95,6 +96,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     raum.add_argument("raumname", metavar="RAUMNAME", help="Kürzel oder Name des Raums")
     raum.set_defaults(func=_cmd_raum)
+
+    ics = subparsers.add_parser(
+        "ics",
+        help="ICal-Export einer Planungsgruppe speichern",
+        description="Lädt den ICal-Link der Planungsgruppe und speichert ihn lokal.",
+    )
+    ics.add_argument("gruppe", metavar="GRUPPE", help="Kürzel oder Name der Gruppe")
+    ics.add_argument(
+        "--datei",
+        metavar="PFAD",
+        help="Zieldatei (Standard: <GRUPPE>.ics im aktuellen Verzeichnis)",
+    )
+    ics.set_defaults(func=_cmd_ics)
 
     return parser
 
@@ -320,6 +334,40 @@ def _cmd_raum(args: argparse.Namespace, client: StarPlanClient, json_mode: bool)
         print(f"{tag.wochentag}, {als_text(tag.datum)}")
         for item in tag.veranstaltungen:
             _print_veranstaltung(item, mit_gruppe=True)
+    return 0
+
+
+def _cmd_ics(args: argparse.Namespace, client: StarPlanClient, json_mode: bool) -> int:
+    semester, gruppe = client.finde_gruppe(args.gruppe)
+    inhalt = client.ical_pg(semester, gruppe)
+    ziel = Path(args.datei) if args.datei else Path(f"{gruppe.shortname}.ics")
+    if not ziel.parent.exists():
+        raise NotFoundError(
+            f"Zielverzeichnis {str(ziel.parent)!r} existiert nicht.",
+            "ein vorhandenes Verzeichnis mit --datei angeben",
+        )
+    try:
+        ziel.write_bytes(inhalt)
+    except OSError as exc:
+        grund = exc.strerror or str(exc)
+        raise NotFoundError(
+            f"ICal konnte nicht nach {str(ziel)!r} geschrieben werden: {grund}",
+            "einen anderen Pfad mit --datei angeben",
+        ) from exc
+    termine = inhalt.count(b"BEGIN:VEVENT")
+    if json_mode:
+        _emit_json(
+            {
+                "ok": True,
+                "datei": str(ziel),
+                "termine": termine,
+                "gruppe": _gruppe_json(gruppe),
+            }
+        )
+        return 0
+
+    print(f"ICal gespeichert: {ziel}")
+    print(f"{termine} Termin" if termine == 1 else f"{termine} Termine")
     return 0
 
 
