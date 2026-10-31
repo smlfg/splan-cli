@@ -1,92 +1,142 @@
-# UX-Spec: kurstool
+# UX-Spec: splan
 
-Diese Datei ist die Vorlage für `docs/UX.md` in jedem neuen Repo. Sie wird vor der ersten Codezeile ausgefüllt. Alle Befehle sind so abtippbar, wie ein Mensch sie im Terminal eingibt. Beispielwerte (Tool `kurstool`, Kursnummern, Mails auf `.invalid`) werden durch die echten Werte des Projekts ersetzt.
-
-Ablauf beim Ausfüllen:
-
-1. Website live öffnen und die drei wichtigsten Aufgaben eines Menschen heraussuchen.
-2. Jede Aufgabe als Sitzung mitschreiben: Befehl, Eingabe, erwartete Ausgabe.
-3. Lesende Routen und alle Formularschritte der schreibenden Aktion ergänzen.
-4. Fixtures unter `tests/fixtures/ux/` ablegen.
-5. `python tests/harness/ux_check.py --spec-only` laufen lassen; erst bei grünem UX01 weiterbauen.
+`splan` zeigt Stundenpläne der Hochschule Heilbronn aus StarPlan im Terminal.
+Die Seite ist öffentlich: Es gibt keinen Login und keine schreibende
+Web-Aktion. Alle Befehle sind so abtippbar, wie ein Mensch sie im Terminal
+eingibt. Semester und Planungseinheit wählt das Tool automatisch.
 
 ## Meta
 
-Das Meta-Objekt benennt den Befehlsnamen im PATH, den Installationsbefehl und alle Umgebungsvariablen. `base_url_env` ist Pflicht, sobald es Routen oder Formsteps gibt. `credential_env` führt dazu, dass das Tool einen `login`-Befehl haben muss.
+Das Meta-Objekt benennt den Befehlsnamen im PATH, den Installationsbefehl und
+alle Umgebungsvariablen. `SPLAN_BASE_URL` überschreibt die Basis-URL für den
+Fake-Server. `SPLAN_HEUTE` macht die datumsabhängigen Sitzungen für Tests
+deterministisch.
 
 ```ux-meta
-{"tool": "kurstool",
- "install": "pipx install git+https://github.com/smlfg/kurstool-cli",
- "base_url_env": "KURSTOOL_BASE_URL",
- "env": {"KURSTOOL_STATUSGRUPPE": "studierende"},
- "credential_env": ["KURSTOOL_LOGIN_USER", "KURSTOOL_LOGIN_PASSWORD"]}
+{"tool": "splan",
+ "install": "pipx install git+https://github.com/smlfg/splan-cli",
+ "base_url_env": "SPLAN_BASE_URL",
+ "env": {"SPLAN_HEUTE": "2026-11-02"}}
 ```
 
 ## Sitzungen
 
-Jede Sitzung ist eine Nutzer-Aufgabe. Es müssen mindestens drei sein, darunter Login, Suche per Name und eine schreibende Aktion. `$` ist ein Befehl, `>` eine Eingabe, `<` eine erwartete Ausgabe und `!` der erwartete Exit-Code. Der Installationsbefehl wird von der Harness durch eine lokale Installation in ein frisches venv ersetzt.
+Jede Sitzung ist eine Nutzer-Aufgabe. `$` ist ein Befehl, `>` eine Eingabe,
+`<` eine erwartete Ausgabe und `!` der erwartete Exit-Code. Der
+Installationsbefehl wird von der Harness durch eine lokale Installation in ein
+frisches venv ersetzt.
 
-### Installation und Login
+### Installation und Studiengang suchen
 
-Der Login fragt im Terminal interaktiv nach Benutzer und Passwort. Das Passwort wird nicht angezeigt und nicht gespeichert; die Sitzung landet im Schlüsselbund oder in einer Datei mit Rechten 0600. Die Zugangsdaten stammen aus einem Testkonto, nie aus echten Daten.
+Der Suchbegriff ist positional. Die Ausgabe nennt Studiengang und
+Planungsgruppe, damit ein Mensch ohne Nachschlagen weiterarbeiten kann.
 
 ```ux-session
-$ pipx install git+https://github.com/smlfg/kurstool-cli
-< kurstool
-$ kurstool login
-< Benutzer:
-> max.mustermann@example.invalid
-< Passwort:
-> geheim
-< Login erfolgreich
+$ pipx install git+https://github.com/smlfg/splan-cli
+$ splan suche "Angewandte Informatik"
+< Semester: Wintersemester 2026/2027
+< Angewandte Informatik (AI)
+< AI1 – AI 1. Semester
+< AI2 – AI 2. Semester
+< AI3 – AI 3. Semester
 ! exit 0
 ```
 
-### Kurse nach Namen suchen
+### Stundenplan einer Planungsgruppe
 
-Der Suchbegriff ist positional. Die Ausgabe zeigt Namen und Kursnummer, damit ein Mensch ohne Nachschlagen weiterarbeiten kann.
+`plan` nimmt den Namen der Planungsgruppe positional. Ohne weitere Option
+zeigt das Tool die aktuelle Woche; die Ausgabe nennt Zeit, Veranstaltung,
+Raum und Dozent.
 
 ```ux-session
-$ kurstool search volleyball
-< 1) Volleyball Anfänger (Kurs 32304)
-< 2) Volleyball Fortgeschritten (Kurs 32305)
+$ splan plan AI1
+< Plan AI1 – Woche 02.11.2026 bis 06.11.2026
+< Montag, 02.11.2026
+< 08:00-09:30  Lineare Algebra und Computergrafik (173423)
+< Raum A411 · Prof. Dr. A. Beispiel
+< 09:45-11:15  Freies Lernen
+< Raum E116
+< Dienstag, 03.11.2026
+< 09:45-11:15  Informationssicherheit 1 (173431)
+< Raum E219 · M. Muster
 ! exit 0
 ```
 
-### Kurs verbindlich buchen
+### Heutiger Stundenplan
 
-Die schreibende Aktion zeigt zuerst Kurs, Ort und Preis. Danach fragt sie mit Default Nein. Erst nach `j` werden alle Formularschritte bis zur endgültigen Bestätigung gesendet. Bei `N` endet der Befehl ohne Request an einen Schritt ohne `before_confirm`.
+`heute` ist die Kurzform für den aktuellen Tag. Die Sitzung nutzt
+`SPLAN_HEUTE` aus dem Meta-Block, damit die erwartete Ausgabe zu den Fixtures
+passt.
 
 ```ux-session
-$ kurstool book "Volleyball Anfänger"
-< Kurs: Volleyball Anfänger (32304)
-< Ort: Sporthalle Nord
-< Preis: 25,00 EUR
-< Buchung verbindlich? [j/N]
-> j
-< Buchung bestätigt
-< Bestätigungsnummer: KB-2026-0042
+$ splan heute AI1
+< Heute, Montag 02.11.2026 – AI1
+< 08:00-09:30  Lineare Algebra und Computergrafik (173423)
+< Raum A411 · Prof. Dr. A. Beispiel
+< 09:45-11:15  Freies Lernen
+< Raum E116
+! exit 0
+```
+
+### Raumbelegung
+
+`raum` sucht den Raum per Namen über alle Standorte und zeigt seine Belegung.
+Die Raum-ID muss ein Mensch nicht kennen.
+
+```ux-session
+$ splan raum A411
+< Raum A411 – TechCampus HN
+< Montag, 02.11.2026
+< 08:00-09:30  Lineare Algebra und Computergrafik (173423) · AI1
+< 11:30-13:00  Programmieren 1 (173411) · AI1
+! exit 0
+```
+
+### ICal exportieren
+
+`ics` lädt den ICal-Link von StarPlan herunter und speichert ihn lokal. Das
+Ziel wird mit `--datei` angegeben; ohne die Option landet die Datei im
+aktuellen Verzeichnis.
+
+```ux-session
+$ splan ics AI1 --datei scratch/tmp/ai1.ics
+< ICal gespeichert: scratch/tmp/ai1.ics
+< 1 Termin
+! exit 0
+```
+
+### Standardgruppe speichern
+
+`standard` merkt sich eine Planungsgruppe in der Konfiguration, damit
+`heute` und `plan` ohne Argument funktionieren.
+
+```ux-session
+$ splan standard AI1
+< Standardgruppe gespeichert: AI1
 ! exit 0
 ```
 
 ## Lesende Routen
 
-Hier stehen alle Routen, die die Sitzungen gegen den Fake-Server brauchen. `path` wird ohne Querystring exakt verglichen; `query_contains` ist optional. Der Login ist ein POST, löst aber keine Buchung aus und gehört deshalb zu den lesenden Routen. Die Antwortdateien liegen relativ zum Repo.
+Hier stehen alle Routen, die die Sitzungen gegen den Fake-Server brauchen.
+`path` wird ohne Querystring exakt verglichen; `query_contains` ist optional.
+Die Basis-URL kommt aus `SPLAN_BASE_URL`, die Antwortdateien liegen relativ
+zum Repo.
 
 ```ux-routes
-[{"method":"POST","path":"/login","response":"tests/fixtures/ux/login_erfolg.html","status":200,"content_type":"text/html; charset=utf-8"},
- {"method":"GET","path":"/kurse","query_contains":"volleyball","response":"tests/fixtures/ux/kurse.html","status":200,"content_type":"text/html; charset=utf-8"},
- {"method":"GET","path":"/kurse/32304","response":"tests/fixtures/ux/kurs_32304.html","status":200,"content_type":"text/html; charset=utf-8"}]
+[{"method":"GET","path":"/json","query_contains":"m=getpus","response":"tests/fixtures/ux/getpus.json","status":200,"content_type":"application/json; charset=utf-8"},
+ {"method":"GET","path":"/json","query_contains":"m=getogs","response":"tests/fixtures/ux/getogs.json","status":200,"content_type":"application/json; charset=utf-8"},
+ {"method":"GET","path":"/json","query_contains":"m=getPgsExt","response":"tests/fixtures/ux/getpgs_ai.json","status":200,"content_type":"application/json; charset=utf-8"},
+ {"method":"GET","path":"/json","query_contains":"sel=ro","response":"tests/fixtures/ux/gettt_room_a411.html","status":200,"content_type":"text/html; charset=utf-8"},
+ {"method":"GET","path":"/json","query_contains":"m=getTT","response":"tests/fixtures/ux/gettt_ai1.html","status":200,"content_type":"text/html; charset=utf-8"},
+ {"method":"GET","path":"/json","query_contains":"m=getlocs","response":"tests/fixtures/ux/getlocs.json","status":200,"content_type":"application/json; charset=utf-8"},
+ {"method":"GET","path":"/json","query_contains":"loc=2","response":"tests/fixtures/ux/getros_loc2.json","status":200,"content_type":"application/json; charset=utf-8"},
+ {"method":"GET","path":"/json","query_contains":"m=getros","response":"tests/fixtures/ux/getros_empty.json","status":200,"content_type":"application/json; charset=utf-8"},
+ {"method":"GET","path":"/ical","response":"tests/fixtures/ux/ical_ai1.ics","status":200,"content_type":"text/calendar; charset=utf-8"}]
 ```
 
-## Formularschritte der schreibenden Aktion
+## Schreibende Aktionen
 
-Die Liste enthält ALLE Requests in Reihenfolge, bis die Buchung endgültig bestätigt ist. `sends` nennt Feldnamen, die im Body vorkommen müssen; ein `*` am Ende erlaubt Präfix-Treffer. `before_confirm: true` ist nur für Schritte erlaubt, die vor der `[j/N]`-Frage laufen und nichts verbindlich auslösen, zum Beispiel das Öffnen des Formulars. `live: erkundet` heißt lesend auf der echten Seite gesehen, `live: synthetisch` heißt nachgebaut und als solches markiert.
-
-```ux-formsteps
-[{"id":"formular_oeffnen","method":"POST","path":"/buchen/32304","sends":["kurs_id"],"response":"tests/fixtures/ux/buchen_formular.html","before_confirm":true,"live":"erkundet"},
- {"id":"teilnehmerdaten","method":"POST","path":"/buchen/32304","sends":["vorname","nachname","email","statusgruppe"],"response":"tests/fixtures/ux/buchen_uebersicht.html","live":"synthetisch"},
- {"id":"verbindlich","method":"POST","path":"/buchen/32304","sends":["bestaetigungstoken"],"response":"tests/fixtures/ux/buchen_bestaetigt.html","final":true,"live":"synthetisch"}]
-```
-
-Der letzte Schritt trägt `"final": true`. Fehlt ein Schritt oder endet die Aktion nach dem ersten Request, meldet `ux_check.py` UX08 und `ux_session.py` bricht den Lauf ab. Beide Gates müssen grün sein, bevor der Build als fertig gilt.
+`splan` hat keine schreibende Web-Aktion. Es gibt daher keine
+`ux-formsteps`, keine Bestätigungsfrage `[j/N]` und keine
+`credential_env`-Variablen.
