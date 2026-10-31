@@ -51,7 +51,7 @@ def _urllib_fetch(url: str, timeout: float) -> Response:
         if exc.headers is not None:
             content_type = exc.headers.get_content_type()
         return Response(status=int(exc.code), content_type=content_type, body=body)
-    except (URLError, TimeoutError, OSError) as exc:
+    except (URLError, TimeoutError, OSError, ValueError) as exc:
         reason = getattr(exc, "reason", exc)
         raise SourceError(
             f"StarPlan ist nicht erreichbar: {reason}",
@@ -66,6 +66,11 @@ def _validate_base_url(raw: str) -> str:
         raise UsageError(
             f"SPLAN_BASE_URL ist keine gültige HTTP(S)-URL: {raw!r}",
             "SPLAN_BASE_URL als vollständige URL setzen, z. B. https://splan.hs-heilbronn.de/splan/",
+        )
+    if any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+        raise UsageError(
+            f"SPLAN_BASE_URL enthält Leerzeichen oder Steuerzeichen: {raw!r}",
+            "SPLAN_BASE_URL als vollständige URL ohne Leerzeichen setzen",
         )
     path = parts.path or "/"
     if not path.endswith("/"):

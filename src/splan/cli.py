@@ -470,3 +470,11 @@ def main(argv: list[str] | None = None) -> int:
         )
     except BrokenPipeError:
         return 0
+    except Exception as exc:  # noqa: BLE001 - nie Tracebacks im Terminal
+        return _report_error(
+            SourceError(
+                f"Unerwarteter Fehler: {exc}",
+                "splan --help ausführen und den Befehl erneut versuchen",
+            ),
+            json_requested or not sys.stdout.isatty(),
+        )
