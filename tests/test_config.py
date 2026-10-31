@@ -48,3 +48,16 @@ def test_kaputte_konfiguration(monkeypatch, tmp_path) -> None:
     with pytest.raises(ConfigError) as excinfo:
         standardgruppe()
     assert excinfo.value.code == 2
+
+
+def test_nicht_utf8_konfiguration(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    path = config_path()
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\xffkaputt")
+
+    with pytest.raises(ConfigError) as excinfo:
+        standardgruppe()
+    assert excinfo.value.code == 2
+    assert "UTF-8" in excinfo.value.message
+    assert "löschen" in excinfo.value.next_step

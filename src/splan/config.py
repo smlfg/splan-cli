@@ -22,6 +22,11 @@ def _lesen(path: Path) -> dict:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return {}
+    except UnicodeDecodeError as exc:
+        raise ConfigError(
+            f"Konfiguration {str(path)!r} ist nicht gültig UTF-8-kodiert.",
+            "die Datei korrigieren oder löschen, danach splan standard GRUPPE ausführen",
+        ) from exc
     except OSError as exc:
         raise ConfigError(
             f"Konfiguration {str(path)!r} ist nicht lesbar: {exc.strerror or exc}",

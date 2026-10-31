@@ -1,8 +1,11 @@
+import io
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+from splan.cli import main
 
 REPO = Path(__file__).resolve().parents[1]
 ENV = {
@@ -76,3 +79,45 @@ def test_ungueltiges_testdatum_ohne_traceback() -> None:
     assert payload["ok"] is False
     assert "SPLAN_HEUTE" in payload["fehler"]
     assert "Traceback" not in result.stderr
+
+
+def test_kaputte_konfiguration_ohne_traceback(tmp_path, monkeypatch) -> None:
+    config_home = tmp_path / "config"
+    path = config_home / "splan-cli" / "config.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\xffkaputt")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+
+    class Terminal(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    stdout = Terminal()
+    stderr = Terminal()
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", stderr)
+
+    code = main(["heute"])
+
+    assert code == 2
+    assert "UTF-8" in stderr.getvalue()
+    assert "Nächster Schritt" in stderr.getvalue()
+    assert "Traceback" not in stderr.getvalue()
+    assert "Traceback" not in stdout.getvalue()
+
+
+def test_kaputte_konfiguration_json_ohne_traceback(tmp_path) -> None:
+    config_home = tmp_path / "config"
+    path = config_home / "splan-cli" / "config.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\xffkaputt")
+    env = {**ENV, "XDG_CONFIG_HOME": str(config_home)}
+
+    result = _run("--json", "heute", env=env)
+
+    assert result.returncode == 2
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert "UTF-8" in payload["fehler"]
+    assert "löschen" in payload["naechster_schritt"]
+    assert result.stderr == ""
