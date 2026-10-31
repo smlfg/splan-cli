@@ -9,7 +9,13 @@ from datetime import timedelta
 
 from . import __version__
 from .client import StarPlanClient
-from .dates import als_text, woche_fuer_optionen, wochenende
+from .dates import (
+    als_text,
+    woche_fuer_optionen,
+    wochenende,
+    wochenstart,
+    wochentag,
+)
 from .errors import NotFoundError, SplanError, UsageError
 from .models import Planungsgruppe, Semester, Studiengang, Tag, Veranstaltung
 from .parser import parse_timetable
@@ -38,7 +44,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"splan {__version__}",
     )
-    subparsers = parser.add_subparsers(dest="command", metavar="{suche,plan}")
+    subparsers = parser.add_subparsers(dest="command", metavar="{suche,plan,heute}")
 
     suche = subparsers.add_parser(
         "suche",
@@ -61,6 +67,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--datum", metavar="JJJJ-MM-TT", help="ein Tag in der gewünschten Woche"
     )
     plan.set_defaults(func=_cmd_plan)
+
+    heute = subparsers.add_parser(
+        "heute",
+        help="heutigen Stundenplan anzeigen",
+        description="Zeigt nur den heutigen Tag; ohne Gruppe gilt die Standardgruppe.",
+    )
+    heute.add_argument(
+        "gruppe", nargs="?", metavar="GRUPPE", help="Kürzel oder Name der Gruppe"
+    )
+    heute.set_defaults(func=_cmd_heute)
 
     return parser
 
@@ -202,6 +218,47 @@ def _cmd_plan(args: argparse.Namespace, client: StarPlanClient, json_mode: bool)
         print(f"{tag.wochentag}, {als_text(tag.datum)}")
         for item in tag.veranstaltungen:
             _print_veranstaltung(item)
+    return 0
+
+
+def _cmd_heute(args: argparse.Namespace, client: StarPlanClient, json_mode: bool) -> int:
+    if not args.gruppe:
+        raise NotFoundError(
+            "Keine Standardgruppe gespeichert.",
+            "splan standard GRUPPE ausführen oder eine Gruppe angeben",
+        )
+    today = client.today
+    week_start = wochenstart(today)
+    semester, gruppe = client.finde_gruppe(args.gruppe)
+    _woche_pruefen(semester, week_start)
+    html = client.timetable_pg(semester, gruppe, week_start)
+    fallback = [week_start + timedelta(days=i) for i in range(5)]
+    tage = parse_timetable(html, fallback)
+    tag = next((item for item in tage if item.datum == today), None)
+    if tag is None:
+        tag = Tag(datum=today, wochentag=wochentag(today))
+    if json_mode:
+        _emit_json(
+            {
+                "ok": True,
+                "heute": today.isoformat(),
+                "gruppe": _gruppe_json(gruppe),
+                "semester": {"id": semester.id, "name": semester.name},
+                "woche": {
+                    "von": week_start.isoformat(),
+                    "bis": wochenende(week_start).isoformat(),
+                },
+                "tage": [_tag_json(tag)],
+            }
+        )
+        return 0
+
+    print(f"Heute, {tag.wochentag} {als_text(tag.datum)} – {gruppe.shortname}")
+    if not tag.veranstaltungen:
+        print("Keine Veranstaltungen.")
+        return 0
+    for item in tag.veranstaltungen:
+        _print_veranstaltung(item)
     return 0
 
 
